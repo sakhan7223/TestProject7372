@@ -3,6 +3,8 @@ import { UserService } from '../Service/user.service';
 import { FormBuilder, FormGroup, Validators } from '@angular/forms';
 import { ModalComponent } from 'ng2-bs3-modal/ng2-bs3-modal';
 import { IUser } from '../Model/user';
+import { userItem } from '../Model/userItem';
+import { shoppingCart } from '../Model/shoppingCart'; //import shoppingCart class
 import { DBOperation } from '../Shared/enum';
 import { Observable } from 'rxjs/Rx';
 import { Global } from '../Shared/global';
@@ -15,13 +17,16 @@ export class UserComponent implements OnInit {
 
     @ViewChild('modal') modal: ModalComponent;
     users: IUser[];
+    selectedUsers: IUser[] = []; //create an empty array to store selectd chbx items
     user: IUser;
+    currentUser: IUser;
     msg: string;
     indLoading: boolean = false;
     userFrm: FormGroup;
     dbops: DBOperation;
     modalTitle: string;
     modalBtnTitle: string;
+    currentShoppingCart: shoppingCart; //shopping cart variable
 
     constructor(private fb: FormBuilder, private _userService: UserService) { }
 
@@ -33,6 +38,41 @@ export class UserComponent implements OnInit {
             Gender: ['', Validators.required]
         });
         this.LoadUsers();
+        this.LoadShoppingCart();
+    }
+    ////////////////////////////////////////////////////////////////////////////////////////////
+    checkboxChanged(userIdString: string) {
+        var userId = parseInt(userIdString); //convert 
+        //go through a for loop
+        for (var i = 0; i < this.selectedUsers.length; i++) {
+            if (this.selectedUsers[i].Id == userId) {
+                this.selectedUsers.splice(i, 1); //when found, rmeove element from array
+                return;
+            }
+        }
+        //if user not in selectedlist                           
+        //find the user with userid first
+        var currentSelectedUser = this.findUserbyId(userId);
+        if (currentSelectedUser != null) { //if not here, then append to end of selectedUsers array
+            this.selectedUsers.push(currentSelectedUser);
+        }
+    }
+
+    findUserbyId(userId: number) { //find the user by id
+        for (var i = 0; i < this.users.length; i++) {
+            if (this.users[i].Id == userId) {
+                return this.users[i];
+            }
+            return null;
+        }
+    }
+///////////////////////////////////////////////////////////////////////////////////////////////
+
+    LoadShoppingCart(): void {
+        this.currentUser = JSON.parse(sessionStorage.getItem("currentUser"));
+       // var selecteduserItemList = this.convertUserListToUserItemList(this.selectedUsers);
+        //check if shopping cart exists from logged in/linked user
+        this.currentShoppingCart = JSON.parse(localStorage.getItem("currentShoppingCart" + this.currentUser.Id));
     }
 
     LoadUsers(): void {
@@ -50,7 +90,58 @@ export class UserComponent implements OnInit {
         this.userFrm.reset();
         this.modal.open();
     }
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    purchaseItems() {
+        //current user is already logged in so we retrive current userid first
+        this.currentUser = JSON.parse(sessionStorage.getItem("currentUser"));
+        var selecteduserItemList = this.convertUserListToUserItemList(this.selectedUsers);
+        //check if shopping cart exists from logged in/linked user
+        this.currentShoppingCart = JSON.parse(localStorage.getItem("currentShoppingCart" + this.currentUser.Id));
+        if (this.currentShoppingCart == null) {
+            this.currentShoppingCart = new shoppingCart();
+            this.currentShoppingCart.userId = this.currentUser.Id; // who's shopping cart assigned
+            this.currentShoppingCart.userItemList = selecteduserItemList;  //productlist selected via checkbox array 
+            //convert selectedusers to selecteduseritems
+        } else { //if user has a shopping cart
+            this.currentShoppingCart.userItemList = this.mergeItemList(this.currentShoppingCart.userItemList, selecteduserItemList);
+        }
+        //store shopping car tot local storage
+        localStorage.setItem("currentShoppingCart" + this.currentUser.Id, JSON.stringify(this.currentShoppingCart));
+    }
 
+    convertUserListToUserItemList(selectedUsers: IUser[]) { //*************************
+        var userItemList: userItem[] = [];
+        for (var i = 0; i < selectedUsers.length; i++) {
+            var tempUserItem = new userItem();
+            tempUserItem.Quantity = 1;
+            tempUserItem.user = selectedUsers[i];
+            tempUserItem.SubTotal = 10.00 * tempUserItem.Quantity; //asume price is 10.00
+            userItemList.push(tempUserItem);
+        }
+        return userItemList;
+    }
+                                //IProduct[]   //**************************8
+    mergeItemList(existingItems: userItem[], newItemList: userItem[]) { // go through item list and check merege 2 exsiting items
+        var matchingFlag = false;
+        for (var i = 0; i < existingItems.length; i++) {
+            var currentitem = existingItems[i];
+            matchingFlag = false; //everytime item retrieved new current item, reset to false
+            for (var j = 0; j < newItemList.length;j++){ //check if new items match current items in list
+                if (currentitem.user.Id == newItemList[j].user.Id) {
+                    //new items are duplicated with existing items
+                    matchingFlag = true;
+                    newItemList[j].Quantity = currentitem.Quantity + newItemList[j].Quantity;
+                    break;
+                } 
+            }
+            //end of for loop, find existing item index=i, does not match any new item
+            if (!matchingFlag) { // if false, add existing item to end of new item
+                newItemList.push(currentitem);
+            }
+        }
+        return newItemList; //has existing and new items
+    }
+/////////////////////////////////////////////////////////////////////////
     editUser(id: number) {
         this.dbops = DBOperation.update;
         this.SetControlsState(true);
@@ -82,6 +173,7 @@ export class UserComponent implements OnInit {
                         {
                             this.msg = "Data successfully added.";
                             this.LoadUsers();
+                            
                         }
                         else
                         {
